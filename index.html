@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111418" />
+    <title>MeetNotes Benchmark</title>
+    <script>
+      // Register the isolation service worker on hosts that can't send COOP/COEP headers, then reload once.
+      if (!self.crossOriginIsolated && 'serviceWorker' in navigator && !sessionStorage.getItem('coi-reloaded')) {
+        navigator.serviceWorker.register('./coi-sw.js').then((reg) => {
+          const reload = () => { sessionStorage.setItem('coi-reloaded', '1'); location.reload(); };
+          if (reg.active && !navigator.serviceWorker.controller) reload();
+          else reg.addEventListener('updatefound', () => {
+            reg.installing?.addEventListener('statechange', (e) => { if (e.target.state === 'activated') reload(); });
+          });
+        });
+      }
+    </script>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <h1>MeetNotes <span class="muted">benchmark</span></h1>
+      <p class="muted small">Checks whether this phone can transcribe, separate speakers and summarise a meeting entirely on-device.</p>
+    </header>
+
+    <main>
+      <section class="card" id="card-device">
+        <h2><span class="step">1</span> This phone</h2>
+        <dl class="facts" id="device-facts"><dt>Checking…</dt><dd></dd></dl>
+      </section>
+
+      <section class="card" id="card-audio">
+        <h2><span class="step">2</span> Test audio</h2>
+        <p class="muted small">Best test: record 3–5 minutes of 2–3 people talking in Hindi + English, phone on the table like in a real meeting.</p>
+        <div class="row">
+          <button id="btn-rec" class="primary">● Record</button>
+          <label class="btn"><input type="file" id="file-in" accept="audio/*,video/*" hidden />Choose file</label>
+        </div>
+        <div class="row">
+          <select id="sample-pick" style="flex: 1; min-width: 0">
+            <option value="interview.wav">Sample: interview (English, 2 speakers)</option>
+            <option value="courtroom.wav">Sample: courtroom (English, several speakers)</option>
+            <option value="jfk.wav">Sample: JFK (English, 11 s, 1 speaker)</option>
+          </select>
+          <button id="btn-sample">Load sample</button>
+        </div>
+        <label class="check"><input type="checkbox" id="chk-dark" checked /> Dark screen while recording (keeps phone awake)</label>
+        <div id="rec-status" class="status" hidden></div>
+        <audio id="player" controls hidden></audio>
+        <dl class="facts" id="audio-facts"></dl>
+      </section>
+
+      <section class="card" id="card-asr">
+        <h2><span class="step">3</span> Speech → English text</h2>
+        <div class="grid">
+          <label>Model
+            <select id="asr-model">
+              <option value="onnx-community/whisper-base">Whisper base (≈80 MB, faster)</option>
+              <option value="onnx-community/whisper-small" selected>Whisper small (≈250 MB, better Hindi)</option>
+            </select>
+          </label>
+          <label>Engine
+            <select id="asr-device">
+              <option value="webgpu">GPU (WebGPU)</option>
+              <option value="wasm">CPU (WASM)</option>
+            </select>
+          </label>
+          <label>Spoken language
+            <select id="asr-lang">
+              <option value="hindi" selected>Hindi / Hinglish</option>
+              <option value="english">English</option>
+            </select>
+          </label>
+          <label>Output
+            <select id="asr-task">
+              <option value="translate" selected>Translate to English</option>
+              <option value="transcribe">Transcribe as spoken</option>
+            </select>
+          </label>
+        </div>
+        <button id="btn-asr" class="primary" disabled>Run speech-to-text</button>
+        <div class="progress" id="asr-progress" hidden><div></div><span></span></div>
+        <dl class="facts" id="asr-facts"></dl>
+      </section>
+
+      <section class="card" id="card-diar">
+        <h2><span class="step">4</span> Who spoke when</h2>
+        <div class="grid">
+          <label>Same-speaker threshold
+            <input type="number" id="diar-threshold" value="0.5" min="0.1" max="0.95" step="0.05" />
+          </label>
+        </div>
+        <div class="row">
+          <button id="btn-diar" class="primary" disabled>Run speaker separation</button>
+          <button id="btn-recluster" disabled>Re-group speakers</button>
+        </div>
+        <div class="progress" id="diar-progress" hidden><div></div><span></span></div>
+        <dl class="facts" id="diar-facts"></dl>
+        <div id="timeline" class="timeline" hidden></div>
+        <details id="transcript-wrap" hidden>
+          <summary>Transcript with speakers</summary>
+          <div id="transcript" class="transcript"></div>
+        </details>
+      </section>
+
+      <section class="card" id="card-llm">
+        <h2><span class="step">5</span> Summary &amp; minutes (on-device LLM)</h2>
+        <div class="grid">
+          <label>Model
+            <select id="llm-model"></select>
+          </label>
+        </div>
+        <button id="btn-llm" class="primary" disabled>Run summary</button>
+        <div class="progress" id="llm-progress" hidden><div></div><span></span></div>
+        <dl class="facts" id="llm-facts"></dl>
+        <details id="llm-out-wrap" hidden open>
+          <summary>Generated minutes</summary>
+          <pre id="llm-out" class="md"></pre>
+        </details>
+      </section>
+
+      <section class="card" id="card-screen">
+        <h2><span class="step">6</span> Screen &amp; alerts</h2>
+        <div class="row">
+          <button id="btn-dark">Test dark screen</button>
+          <button id="btn-alarm">Test handover alarm</button>
+        </div>
+        <dl class="facts" id="screen-facts"></dl>
+      </section>
+
+      <section class="card" id="card-results">
+        <h2>Results</h2>
+        <div class="row">
+          <button id="btn-all" class="primary" disabled>Run 3 → 4 → 5</button>
+          <button id="btn-copy">Copy</button>
+          <button id="btn-share">Share</button>
+          <button id="btn-download">Download JSON</button>
+        </div>
+        <p class="muted small">Send this to the dev team after testing on each phone.</p>
+        <pre id="results-json" class="json"></pre>
+        <details>
+          <summary>Log</summary>
+          <pre id="log" class="log"></pre>
+        </details>
+      </section>
+    </main>
+
+    <div id="dark-overlay" hidden>
+      <div class="dark-dot"></div>
+      <div id="dark-time" class="dark-time">00:00</div>
+      <div class="dark-hint">Double-tap to exit</div>
+    </div>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
